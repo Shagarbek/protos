@@ -1,0 +1,73 @@
+name: Generate ProtoBuf
+
+on:
+  push:
+    branches:
+      - [cite_start]master  # Убедись, что твоя ветка называется master, а не main [cite: 13]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Generator Repo
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install Protobuf Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install Go Protobuf Tools
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Clone Proto Files Repository
+        run: git clone https://github.com/Shagarbek/protos.git proto-src
+
+      - name: Generate Go Code from Proto Files
+        run: |
+
+          echo "Cleaning up old generated files..."
+          find . -name "*.pb.go" -delete
+
+          echo "Generating .pb.go and _grpc.pb.go files..."
+          find . -name "*.proto" -print0 | xargs -0 -n1 protoc -I. --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:.
+
+          echo "Generated files:"
+          find . -name "*.pb.go"
+
+          if [ -z "$(find . -name '*.pb.go')" ]; then
+            echo "Error: No .pb.go files were generated."
+            exit 1
+          fi
+
+      - name: Push Generated Code to Gen Repo
+        env:
+          PAT_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "Shagarbek"
+          git config --global user.email "shagarbekov@gmail.com"
+
+          cp -r proto-src/* .
+          rm -rf proto-src
+
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Regenerate proto Go files"
+            git push origin master
+          fi
